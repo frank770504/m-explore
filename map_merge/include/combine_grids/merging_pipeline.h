@@ -56,6 +56,9 @@ enum class FeatureType { AKAZE, ORB, SURF };
 class MergingPipeline
 {
 public:
+  MergingPipeline()
+    : main_map_width_(0.0), main_map_height_(0.0) {
+  }
   template <typename InputIt>
   void feed(InputIt grids_begin, InputIt grids_end);
   bool estimateTransforms(FeatureType feature = FeatureType::AKAZE,
@@ -65,11 +68,17 @@ public:
   std::vector<geometry_msgs::Transform> getTransforms() const;
   template <typename InputIt>
   bool setTransforms(InputIt transforms_begin, InputIt transforms_end);
+  void setMainMapSize(double width, double height) {
+    main_map_width_ = width;
+    main_map_height_ = height;
+  }
 
 private:
   std::vector<nav_msgs::OccupancyGrid::ConstPtr> grids_;
   std::vector<cv::Mat> images_;
   std::vector<cv::Mat> transforms_;
+  double main_map_width_;
+  double main_map_height_;
 };
 
 template <typename InputIt>
@@ -109,8 +118,8 @@ bool MergingPipeline::setTransforms(InputIt transforms_begin,
 
   decltype(transforms_) transforms_buf;
   int map_ind = 0;
-  double global_half_width = 2000.f / 2;
-  double global_half_height = 1600.f / 2;
+  double global_half_width = main_map_width_ / 2;
+  double global_half_height = main_map_height_ / 2;
   for (InputIt it = transforms_begin; it != transforms_end; ++it, map_ind++) {
     const geometry_msgs::Quaternion& q = it->rotation;
     if ((q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) <

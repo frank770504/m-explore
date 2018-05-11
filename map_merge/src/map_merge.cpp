@@ -54,6 +54,7 @@ MapMerge::MapMerge() : subscriptions_size_(0)
   private_nh.param("discovery_rate", discovery_rate_, 0.05);
   private_nh.param("estimation_rate", estimation_rate_, 0.5);
   private_nh.param("known_init_poses", have_initial_poses_, true);
+  private_nh.param("using_big_main_map", using_big_main_map_, false);
   private_nh.param("estimation_confidence", confidence_threshold_, 1.0);
   private_nh.param<std::string>("robot_map_topic", robot_map_topic_, "map");
   private_nh.param<std::string>("robot_map_updates_topic",
@@ -161,6 +162,12 @@ void MapMerge::mapMerging()
     }
     // we don't need to lock here, because when have_initial_poses_ is true we
     // will not run concurrently on the pipeline
+    if (using_big_main_map_ && !robots_.empty()) {
+      std::lock_guard<std::mutex> s_lock(robots_["/" + robot_namespace_]->mutex);
+      double width = (double)robots_["/" + robot_namespace_]->readonly_map->info.width;
+      double height = (double)robots_["/" + robot_namespace_]->readonly_map->info.height;
+      pipeline_.setMainMapSize(width, height);
+    }
     pipeline_.feed(grids.begin(), grids.end());
     pipeline_.setTransforms(transforms.begin(), transforms.end());
   }

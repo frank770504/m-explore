@@ -80,6 +80,7 @@ private:
   std::string robot_namespace_;
   std::string world_frame_;
   bool have_initial_poses_;
+  bool using_big_main_map_;
 
   // publishing
   ros::Publisher merged_map_publisher_;
