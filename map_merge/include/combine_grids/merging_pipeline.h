@@ -43,6 +43,7 @@
 #include <nav_msgs/OccupancyGrid.h>
 
 #include <opencv2/core/utility.hpp>
+#include "opencv2/imgproc/imgproc.hpp"
 
 namespace combine_grids
 {
@@ -107,7 +108,8 @@ bool MergingPipeline::setTransforms(InputIt transforms_begin,
                 "data");
 
   decltype(transforms_) transforms_buf;
-  for (InputIt it = transforms_begin; it != transforms_end; ++it) {
+  int map_ind = 0;
+  for (InputIt it = transforms_begin; it != transforms_end; ++it, map_ind++) {
     const geometry_msgs::Quaternion& q = it->rotation;
     if ((q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) <
         std::numeric_limits<double>::epsilon()) {
@@ -115,21 +117,29 @@ bool MergingPipeline::setTransforms(InputIt transforms_begin,
       transforms_buf.emplace_back();
       continue;
     }
+    double half_width = (double)grids_[map_ind]->info.width / 2;
+    double half_height = (double)grids_[map_ind]->info.height / 2;
+    double yaw = 2 * acos(q.w);
+    cv::Mat RR = cv::getRotationMatrix2D(cv::Point2f(half_width, half_height), yaw * 180 / 3.1415926, 1.0);
     double s = 2.0 / (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
     double a = 1 - q.y * q.y * s - q.z * q.z * s;
     double b = q.x * q.y * s + q.z * q.w * s;
     double tx = it->translation.x;
     double ty = it->translation.y;
     cv::Mat transform = cv::Mat::eye(3, 3, CV_64F);
-    transform.at<double>(0, 0) = transform.at<double>(1, 1) = a;
-    transform.at<double>(1, 0) = b;
-    transform.at<double>(0, 1) = -b;
+    //~ transform.at<double>(0, 0) = transform.at<double>(1, 1) = a;
+    //~ transform.at<double>(1, 0) = b;
+    //~ transform.at<double>(0, 1) = -b;
+    //~ transform.at<double>(0, 2) = tx - (a * half_width - b * half_height);
+    //~ transform.at<double>(1, 2) = ty - (b * half_width + a * half_height);
     transform.at<double>(0, 2) = tx;
     transform.at<double>(1, 2) = ty;
-
-    transforms_buf.emplace_back(std::move(transform));
+    //~ RR.at<double>(0, 2) = tx;
+    //~ RR.at<double>(1, 2) = ty;
+    //~ transforms_buf.emplace_back(std::move(transform));
+    cv::Mat RT = RR * transform;
+    transforms_buf.emplace_back(std::move(RT));
   }
-
   if (transforms_buf.size() != images_.size()) {
     return false;
   }
