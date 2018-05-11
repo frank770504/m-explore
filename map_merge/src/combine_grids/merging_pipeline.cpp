@@ -185,8 +185,7 @@ nav_msgs::OccupancyGrid::Ptr MergingPipeline::composeGrids()
   for (size_t i = 0; i < transforms_.size(); ++i) {
     // check if this transform is the reference frame
     if (isIdentity(transforms_[i])) {
-      //~ result->info.resolution = grids_[i]->info.resolution;
-      result->info.resolution = 0.05;
+      result->info.resolution = grids_[i]->info.resolution;
       break;
     }
   }
