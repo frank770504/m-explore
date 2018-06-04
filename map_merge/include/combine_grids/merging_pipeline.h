@@ -57,7 +57,7 @@ class MergingPipeline
 {
 public:
   MergingPipeline()
-    : main_map_width_(0.0), main_map_height_(0.0) {
+    : main_map_width_(0.0), main_map_height_(0.0), main_map_id_(0) {
   }
   template <typename InputIt>
   void feed(InputIt grids_begin, InputIt grids_end);
@@ -79,6 +79,7 @@ private:
   std::vector<cv::Mat> transforms_;
   double main_map_width_;
   double main_map_height_;
+  int main_map_id_;
 };
 
 template <typename InputIt>
@@ -93,8 +94,13 @@ void MergingPipeline::feed(InputIt grids_begin, InputIt grids_end)
   // their guarantee validity for only single-pass algos
   images_.clear();
   grids_.clear();
-  for (InputIt it = grids_begin; it != grids_end; ++it) {
+  int main_finding_ind = 0;
+  for (InputIt it = grids_begin; it != grids_end; ++it, main_finding_ind++) {
     if (*it && !(*it)->data.empty()) {
+      if ((*it)->header.frame_id == "map") {
+        main_map_id_ = main_finding_ind;
+        printf("---------------------------main map id is %d\n", main_map_id_);
+      }
       grids_.push_back(*it);
       /* convert to opencv images. it creates only a view for opencv and does
        * not copy or own actual data. */
@@ -144,8 +150,39 @@ bool MergingPipeline::setTransforms(InputIt transforms_begin,
     //~ transform.at<double>(0, 1) = -b;
     //~ transform.at<double>(0, 2) = tx;
     //~ transform.at<double>(1, 2) = ty;
-    transform.at<double>(0, 2) = -tx / resolution + half_width - global_half_width;
-    transform.at<double>(1, 2) = -ty / resolution + half_height - global_half_height;
+    double tt = 20.0;
+    double minVal = 0.0, maxVal = 0.0;
+    cv::Point minLoc(tt, tt), maxLoc(tt, tt);
+    if (map_ind != main_map_id_ && half_width < global_half_width && half_height < global_half_height) {
+      cv::Rect roi((tx / resolution + global_half_width - half_width - tt),
+                   (ty / resolution + global_half_height - half_height - tt),
+                   (half_width + tt) * 2,
+                   (half_height + tt) * 2);
+
+      cv::rectangle(images_[main_map_id_], roi, cv::Scalar(127));
+      cv::MatIterator_<char> it, end;
+      cv::Mat cropped_main_image = images_[main_map_id_](roi).clone();
+      for( it = cropped_main_image.begin<char>(), end = cropped_main_image.end<char>(); it != end; ++it) {
+        if (*it < 60) {
+          *it = 0;
+        }
+      }
+      cv::Mat image_template = images_[map_ind].clone();
+      for( it = image_template.begin<char>(), end = image_template.end<char>(); it != end; ++it) {
+        if (*it < 60) {
+          *it = 0;
+        }
+      }
+      cv::Mat image_matched;
+      cv::Mat RR = cv::getRotationMatrix2D(cv::Point2f(half_width, half_height), -yaw * 180 / 3.1415926, 1.0);
+      cv::warpAffine(image_template, image_template, RR, image_template.size());
+      cv::matchTemplate(cropped_main_image, image_template, image_matched, cv::TM_CCORR_NORMED);
+      cv::minMaxLoc(image_matched, &minVal, &maxVal, &minLoc, &maxLoc);
+      printf("tt-> >%f< <+++++ %f +++++++ %f ++++++++++ maxLoc\n", tt, double(maxLoc.x), double(maxLoc.y));
+      printf("+++++ %f +++++++ %f ++++++++++ shift pixel\n", (double(maxLoc.x) - tt), (double(maxLoc.y) - tt));
+    }
+    transform.at<double>(0, 2) = -(tx / resolution - half_width + global_half_width + (double(maxLoc.x) - tt));
+    transform.at<double>(1, 2) = -(ty / resolution - half_height + global_half_height + (double(maxLoc.y) - tt));
     //~ transforms_buf.emplace_back(std::move(transform));
     cv::Mat RT = RR * transform;
     transforms_buf.emplace_back(std::move(RT));
