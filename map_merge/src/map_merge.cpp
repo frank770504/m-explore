@@ -55,6 +55,8 @@ MapMerge::MapMerge() : subscriptions_size_(0)
   private_nh.param("estimation_rate", estimation_rate_, 0.5);
   private_nh.param("known_init_poses", have_initial_poses_, true);
   private_nh.param("using_big_main_map", using_big_main_map_, false);
+  private_nh.param("shift_pixel_range", shift_pixel_range_, 50.0);
+  private_nh.param("rotate_deg_range", rotate_deg_range_, 10.0);
   private_nh.param("estimation_confidence", confidence_threshold_, 1.0);
   private_nh.param<std::string>("robot_map_topic", robot_map_topic_, "map");
   private_nh.param<std::string>("robot_map_updates_topic",
@@ -169,7 +171,11 @@ void MapMerge::mapMerging()
       pipeline_.setMainMapSize(width, height);
     }
     pipeline_.feed(grids.begin(), grids.end());
-    pipeline_.setTransforms(transforms.begin(), transforms.end(), 50.0, 10.0);
+    if (using_big_main_map_)
+      pipeline_.setTransforms(transforms.begin(), transforms.end(),
+                              shift_pixel_range_, rotate_deg_range_);
+    else
+      pipeline_.setTransforms(transforms.begin(), transforms.end());
   }
 
   nav_msgs::OccupancyGridPtr merged_map;

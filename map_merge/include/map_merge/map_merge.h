@@ -81,6 +81,8 @@ private:
   std::string world_frame_;
   bool have_initial_poses_;
   bool using_big_main_map_;
+  double shift_pixel_range_;
+  double rotate_deg_range_;
 
   // publishing
   ros::Publisher merged_map_publisher_;
