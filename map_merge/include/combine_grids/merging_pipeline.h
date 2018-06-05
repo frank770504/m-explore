@@ -139,20 +139,15 @@ bool MergingPipeline::setTransforms(InputIt transforms_begin,
     double resolution = (double)grids_[map_ind]->info.resolution;
     double yaw = 2 * acos(q.w);
     cv::Mat RR = cv::getRotationMatrix2D(cv::Point2f(half_width, half_height), yaw * 180 / 3.1415926, 1.0);
-    double s = 2.0 / (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
-    double a = 1 - q.y * q.y * s - q.z * q.z * s;
-    double b = q.x * q.y * s + q.z * q.w * s;
+
     double tx = it->translation.x;
     double ty = it->translation.y;
     cv::Mat transform = cv::Mat::eye(3, 3, CV_64F);
-    //~ transform.at<double>(0, 0) = transform.at<double>(1, 1) = a;
-    //~ transform.at<double>(1, 0) = b;
-    //~ transform.at<double>(0, 1) = -b;
-    //~ transform.at<double>(0, 2) = tx;
-    //~ transform.at<double>(1, 2) = ty;
-    double tt = 20.0;
-    double minVal = 0.0, maxVal = 0.0;
+
+    double tt = 50.0;
+    double minVal = -999.0, maxVal = -999.0;
     cv::Point minLoc(tt, tt), maxLoc(tt, tt);
+    double rotating_degree = 0.0;
     if (map_ind != main_map_id_ && half_width < global_half_width && half_height < global_half_height) {
       cv::Rect roi((tx / resolution + global_half_width - half_width - tt),
                    (ty / resolution + global_half_height - half_height - tt),
@@ -165,25 +160,39 @@ bool MergingPipeline::setTransforms(InputIt transforms_begin,
       for( it = cropped_main_image.begin<char>(), end = cropped_main_image.end<char>(); it != end; ++it) {
         if (*it < 60) {
           *it = 0;
+        } else {
+          *it = 255;
         }
       }
       cv::Mat image_template = images_[map_ind].clone();
       for( it = image_template.begin<char>(), end = image_template.end<char>(); it != end; ++it) {
         if (*it < 60) {
           *it = 0;
+        } else {
+          *it = 255;
         }
       }
       cv::Mat image_matched;
-      cv::Mat RR = cv::getRotationMatrix2D(cv::Point2f(half_width, half_height), -yaw * 180 / 3.1415926, 1.0);
-      cv::warpAffine(image_template, image_template, RR, image_template.size());
-      cv::matchTemplate(cropped_main_image, image_template, image_matched, cv::TM_CCORR_NORMED);
-      cv::minMaxLoc(image_matched, &minVal, &maxVal, &minLoc, &maxLoc);
-      printf("tt-> >%f< <+++++ %f +++++++ %f ++++++++++ maxLoc\n", tt, double(maxLoc.x), double(maxLoc.y));
-      printf("+++++ %f +++++++ %f ++++++++++ shift pixel\n", (double(maxLoc.x) - tt), (double(maxLoc.y) - tt));
+      cv::Mat image_template_affined;
+      for (float deg = -10.0; deg < 10.0; deg = deg + 0.1) {
+        double _minVal = 0.0, _maxVal = 0.0;
+        cv::Point _minLoc(tt, tt), _maxLoc(tt, tt);
+        cv::Mat _RR = cv::getRotationMatrix2D(cv::Point2f(half_width, half_height), -(yaw * 180 / 3.1415926 + deg), 1.0);
+        cv::warpAffine(image_template, image_template_affined, _RR, image_template.size());
+        cv::matchTemplate(cropped_main_image, image_template_affined, image_matched, cv::TM_CCORR_NORMED);
+        cv::minMaxLoc(image_matched, &_minVal, &_maxVal, &_minLoc, &_maxLoc);
+        if (_maxVal > maxVal) {
+          maxVal = _maxVal;
+          maxLoc = _maxLoc;
+          rotating_degree = deg;
+        }
+      }
+      RR = cv::getRotationMatrix2D(cv::Point2f(half_width, half_height), yaw * 180 / 3.1415926 + rotating_degree, 1.0);
+      printf("maxVal ++ %f -- maxLoc ++ %f ++ %f -- deg ++ %f\n", maxVal, double(maxLoc.x), double(maxLoc.y), rotating_degree);
+      printf("shift pixel ++ %f ++ %f\n", (double(maxLoc.x) - tt), (double(maxLoc.y) - tt));
     }
     transform.at<double>(0, 2) = -(tx / resolution - half_width + global_half_width + (double(maxLoc.x) - tt));
     transform.at<double>(1, 2) = -(ty / resolution - half_height + global_half_height + (double(maxLoc.y) - tt));
-    //~ transforms_buf.emplace_back(std::move(transform));
     cv::Mat RT = RR * transform;
     transforms_buf.emplace_back(std::move(RT));
   }
@@ -198,3 +207,4 @@ bool MergingPipeline::setTransforms(InputIt transforms_begin,
 }  // namespace combine_grids
 
 #endif  // MERGING_PIPELINE_H_
+
