@@ -68,6 +68,9 @@ public:
   std::vector<geometry_msgs::Transform> getTransforms() const;
   template <typename InputIt>
   bool setTransforms(InputIt transforms_begin, InputIt transforms_end);
+  template <typename InputIt>
+  bool setTransforms(InputIt transforms_begin, InputIt transforms_end,
+                     double shift_range, double rotate_deg_range);
   void setMainMapSize(double width, double height) {
     main_map_width_ = width;
     main_map_height_ = height;
@@ -115,8 +118,9 @@ void MergingPipeline::feed(InputIt grids_begin, InputIt grids_end)
 
 template <typename InputIt>
 bool MergingPipeline::setTransforms(InputIt transforms_begin,
-                                    InputIt transforms_end)
-{
+                                    InputIt transforms_end,
+                                    double shift_range,
+                                    double rotate_deg_range) {
   static_assert(std::is_assignable<geometry_msgs::Transform&,
                                    decltype(*transforms_begin)>::value,
                 "transforms_begin must point to geometry_msgs::Transform "
@@ -144,15 +148,14 @@ bool MergingPipeline::setTransforms(InputIt transforms_begin,
     double ty = it->translation.y;
     cv::Mat transform = cv::Mat::eye(3, 3, CV_64F);
 
-    double tt = 50.0;
     double minVal = -999.0, maxVal = -999.0;
-    cv::Point minLoc(tt, tt), maxLoc(tt, tt);
+    cv::Point minLoc(shift_range, shift_range), maxLoc(shift_range, shift_range);
     double rotating_degree = 0.0;
     if (map_ind != main_map_id_ && half_width < global_half_width && half_height < global_half_height) {
-      cv::Rect roi((tx / resolution + global_half_width - half_width - tt),
-                   (ty / resolution + global_half_height - half_height - tt),
-                   (half_width + tt) * 2,
-                   (half_height + tt) * 2);
+      cv::Rect roi((tx / resolution + global_half_width - half_width - shift_range),
+                   (ty / resolution + global_half_height - half_height - shift_range),
+                   (half_width + shift_range) * 2,
+                   (half_height + shift_range) * 2);
 
       cv::rectangle(images_[main_map_id_], roi, cv::Scalar(127));
       cv::MatIterator_<char> it, end;
@@ -174,9 +177,9 @@ bool MergingPipeline::setTransforms(InputIt transforms_begin,
       }
       cv::Mat image_matched;
       cv::Mat image_template_affined;
-      for (float deg = -10.0; deg < 10.0; deg = deg + 0.1) {
+      for (float deg = -rotate_deg_range; deg < rotate_deg_range; deg = deg + 0.1) {
         double _minVal = 0.0, _maxVal = 0.0;
-        cv::Point _minLoc(tt, tt), _maxLoc(tt, tt);
+        cv::Point _minLoc(shift_range, shift_range), _maxLoc(shift_range, shift_range);
         cv::Mat _RR = cv::getRotationMatrix2D(cv::Point2f(half_width, half_height), -(yaw * 180 / 3.1415926 + deg), 1.0);
         cv::warpAffine(image_template, image_template_affined, _RR, image_template.size());
         cv::matchTemplate(cropped_main_image, image_template_affined, image_matched, cv::TM_CCORR_NORMED);
@@ -189,13 +192,54 @@ bool MergingPipeline::setTransforms(InputIt transforms_begin,
       }
       RR = cv::getRotationMatrix2D(cv::Point2f(half_width, half_height), yaw * 180 / 3.1415926 + rotating_degree, 1.0);
       printf("maxVal ++ %f -- maxLoc ++ %f ++ %f -- deg ++ %f\n", maxVal, double(maxLoc.x), double(maxLoc.y), rotating_degree);
-      printf("shift pixel ++ %f ++ %f\n", (double(maxLoc.x) - tt), (double(maxLoc.y) - tt));
+      printf("shift pixel ++ %f ++ %f\n", (double(maxLoc.x) - shift_range), (double(maxLoc.y) - shift_range));
     }
-    transform.at<double>(0, 2) = -(tx / resolution - half_width + global_half_width + (double(maxLoc.x) - tt));
-    transform.at<double>(1, 2) = -(ty / resolution - half_height + global_half_height + (double(maxLoc.y) - tt));
+    transform.at<double>(0, 2) = -(tx / resolution - half_width + global_half_width + (double(maxLoc.x) - shift_range));
+    transform.at<double>(1, 2) = -(ty / resolution - half_height + global_half_height + (double(maxLoc.y) - shift_range));
     cv::Mat RT = RR * transform;
     transforms_buf.emplace_back(std::move(RT));
   }
+  if (transforms_buf.size() != images_.size()) {
+    return false;
+  }
+  std::swap(transforms_, transforms_buf);
+
+  return true;
+}
+
+template <typename InputIt>
+bool MergingPipeline::setTransforms(InputIt transforms_begin,
+                                    InputIt transforms_end)
+{
+  static_assert(std::is_assignable<geometry_msgs::Transform&,
+                                   decltype(*transforms_begin)>::value,
+                "transforms_begin must point to geometry_msgs::Transform "
+                "data");
+
+  decltype(transforms_) transforms_buf;
+  for (InputIt it = transforms_begin; it != transforms_end; ++it) {
+    const geometry_msgs::Quaternion& q = it->rotation;
+    if ((q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) <
+        std::numeric_limits<double>::epsilon()) {
+      // represents invalid transform
+      transforms_buf.emplace_back();
+      continue;
+    }
+    double s = 2.0 / (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    double a = 1 - q.y * q.y * s - q.z * q.z * s;
+    double b = q.x * q.y * s + q.z * q.w * s;
+    double tx = it->translation.x;
+    double ty = it->translation.y;
+    cv::Mat transform = cv::Mat::eye(3, 3, CV_64F);
+    transform.at<double>(0, 0) = transform.at<double>(1, 1) = a;
+    transform.at<double>(1, 0) = b;
+    transform.at<double>(0, 1) = -b;
+    transform.at<double>(0, 2) = tx;
+    transform.at<double>(1, 2) = ty;
+
+    transforms_buf.emplace_back(std::move(transform));
+  }
+
   if (transforms_buf.size() != images_.size()) {
     return false;
   }

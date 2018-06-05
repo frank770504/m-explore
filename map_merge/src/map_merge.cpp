@@ -169,7 +169,7 @@ void MapMerge::mapMerging()
       pipeline_.setMainMapSize(width, height);
     }
     pipeline_.feed(grids.begin(), grids.end());
-    pipeline_.setTransforms(transforms.begin(), transforms.end());
+    pipeline_.setTransforms(transforms.begin(), transforms.end(), 50.0, 10.0);
   }
 
   nav_msgs::OccupancyGridPtr merged_map;
